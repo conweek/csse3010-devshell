@@ -781,6 +781,10 @@ RULESEOF
         clear
         motd
         cd ~
+
+        # Must be last: ensure sudo wrapper is at front of PATH
+        export PATH="${sudoWrapper}/bin:$PATH"
+        hash -r
       '';
 
     in {
