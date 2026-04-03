@@ -708,9 +708,6 @@ RULESEOF
         pkgs.clang-tools
         pkgs.bear
 
-        # sudo wrapper to preserve Nix PATH in make recipes and scripts
-        sudoWrapper
-
         # Scripts
         firstTimeSetupScript
         configureInfoScript
@@ -735,6 +732,10 @@ RULESEOF
           export PATH="$HOME/csse3010/sourcelib/tools:$PATH"
         fi
         export PATH="$HOME/.local/bin:$PATH"
+
+        # sudo wrapper: prepend to PATH so it shadows /usr/bin/sudo
+        export PATH="${sudoWrapper}/bin:$PATH"
+        hash -r
 
         ${pkgs.lib.optionalString isLinux ''
           # LD_LIBRARY_PATH for JLink (Linux only)
