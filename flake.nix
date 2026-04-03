@@ -88,17 +88,16 @@
         set -euo pipefail
 
         if [ $# -ge 2 ]; then
-          STUDENT_INPUT="''${1,,}"
+          STUDENT_ID="$1"
           shift
           FULL_NAME="$*"
         else
-          read -rp "Enter your UQ student ID (e.g. s48201356): " STUDENT_INPUT
-          STUDENT_INPUT="''${STUDENT_INPUT,,}"
+          read -rp "Enter your 8 digit UQ student number (e.g. 48201356): " STUDENT_ID
           read -rp "Enter your full name: " FULL_NAME
         fi
 
-        if [[ ! "$STUDENT_INPUT" =~ ^s[0-9]{8}$ ]]; then
-          echo "Error: Invalid format. Must be 's' followed by 8 digits (e.g. s48201356)."
+        if [[ ! "$STUDENT_ID" =~ ^[0-9]{8}$ ]]; then
+          echo "Error: Invalid format. Must be 8 digits (e.g. 48201356)."
           exit 1
         fi
 
@@ -106,8 +105,6 @@
           echo "Error: Full name cannot be empty."
           exit 1
         fi
-
-        STUDENT_ID="''${STUDENT_INPUT:1}"
         UQ_USERNAME="s''${STUDENT_ID:0:7}"
         EMAIL="$UQ_USERNAME@student.uq.edu.au"
 
@@ -193,14 +190,12 @@
         echo ""
 
         while true; do
-          read -rp "Enter your 8 digit UQ student ID (e.g. s48201356): " STUDENT_INPUT
-          STUDENT_INPUT="''${STUDENT_INPUT,,}"
-          if [[ "$STUDENT_INPUT" =~ ^s[0-9]{8}$ ]]; then
+          read -rp "Enter your 8 digit UQ student number (e.g. 48201356): " STUDENT_ID
+          if [[ "$STUDENT_ID" =~ ^[0-9]{8}$ ]]; then
             break
           fi
-          echo "Invalid format. Must be 's' followed by 8 digits (e.g. s48201356)."
+          echo "Invalid format. Must be 8 digits (e.g. 48201356)."
         done
-        STUDENT_ID="''${STUDENT_INPUT:1}"
         UQ_USERNAME="s''${STUDENT_ID:0:7}"
 
         while true; do
@@ -301,6 +296,29 @@ SSHEOF
             printf "  \e[1mcsse3010-gitea.uqcloud.net/user/settings/keys\e[0m\n"
             read -rp "Press Enter to retry..."
           done
+        fi
+
+        # Install udev rules and add user to device groups (Linux only)
+        if [ "$(uname)" = "Linux" ]; then
+          echo ""
+          echo "Setting up device permissions (requires sudo)..."
+          sudo tee /etc/udev/rules.d/99-csse3010.rules > /dev/null << 'RULESEOF'
+# Generic serial (ttyACM*, ttyUSB*)
+SUBSYSTEM=="tty", KERNEL=="ttyACM[0-9]*", MODE="0660", GROUP="dialout"
+SUBSYSTEM=="tty", KERNEL=="ttyUSB[0-9]*", MODE="0660", GROUP="dialout"
+
+# SEGGER J-Link
+SUBSYSTEM=="usb", ATTR{idVendor}=="1366", MODE="0666", GROUP="plugdev"
+
+# ST-Link v2 and v2.1
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="3748", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="374b", MODE="0666", GROUP="plugdev"
+RULESEOF
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger
+          sudo usermod -aG dialout,plugdev "$(whoami)"
+          printf '\e[32mDevice permissions configured!\e[0m\n'
+          echo "Note: You may need to log out and back in for group changes to take effect."
         fi
 
         clear
@@ -530,7 +548,7 @@ SSHEOF
             - -mthumb-interwork
       '';
 
-      vscodeSetupScript = pkgs.writeShellScriptBin "vs-init" ''
+      vscodeSetupScript = pkgs.writeShellScriptBin "vscode-init" ''
         set -euo pipefail
 
         if [ $# -eq 0 ]; then
@@ -553,6 +571,25 @@ SSHEOF
 
           printf '\e[32mCreated .vscode config in %s\e[0m\n' "$(realpath "$dir")"
         done
+      '';
+
+      setupVscodeScript = pkgs.writeShellScriptBin "setup-vscode" ''
+        set -euo pipefail
+
+        if ! command -v code &>/dev/null; then
+          echo "Error: VS Code is not installed or 'code' is not in your PATH."
+          echo "Please install VS Code from https://code.visualstudio.com/"
+          exit 1
+        fi
+
+        echo "Installing VS Code extensions..."
+        code --install-extension marus25.cortex-debug
+        code --install-extension ms-vscode.cpptools
+        code --install-extension mcu-debug.debug-tracker-vscode
+        code --install-extension mcu-debug.memory-view
+        code --install-extension mcu-debug.peripheral-viewer
+        code --install-extension mcu-debug.rtos-views
+        printf '\e[32mVS Code extensions installed!\e[0m\n'
       '';
 
       clangdInit = pkgs.writeShellScriptBin "clangd-init" ''
@@ -604,16 +641,7 @@ RULESEOF
         echo "Then log out and back in for the group change to take effect."
       '';
 
-      # ── Platform-conditional packages ──────────────────────────────
-
-      # segger-jlink is only available for Linux in nixpkgs
-      linuxOnlyPackages = pkgs.lib.optionals isLinux [
-        pkgs.segger-jlink
-        pkgs.usbutils
-        installUdevRulesScript
-      ];
-
-      # ── VS Code with extensions ──────────────────────────────
+      # ── VS Code with extensions (NixOS only) ─────────────────────
       vscode = pkgs.vscode-with-extensions.override {
         vscodeExtensions = with pkgs.vscode-extensions; [
           marus25.cortex-debug
@@ -646,12 +674,21 @@ RULESEOF
         ];
       };
 
+      # ── Platform-conditional packages ──────────────────────────────
+
+      # segger-jlink is only available for Linux in nixpkgs
+      linuxOnlyPackages = pkgs.lib.optionals isLinux [
+        pkgs.segger-jlink
+        pkgs.usbutils
+        (pkgs.python3.withPackages (ps: [ ps.pylink-square ]))
+        installUdevRulesScript
+      ];
+
       # ── Common packages ──────────────────
 
       commonPackages = [
         pkgs.screen
         pkgs.gcc-arm-embedded
-        (pkgs.python3.withPackages (ps: [ ps.pylink-square ]))
         pkgs.git
         pkgs.vim
         pkgs.neovim
@@ -660,7 +697,6 @@ RULESEOF
         pkgs.wget
         pkgs.curl
         pkgs.minicom
-        vscode
 
         # LSP
         pkgs.clang-tools
@@ -671,76 +707,88 @@ RULESEOF
         configureInfoScript
         jlinkDebuggerScript
         vscodeSetupScript
+        setupVscodeScript
         updateScript
         clangdInit
         motdScript
       ];
 
+      commonShellHook = ''
+        # Environment variables (same as WSL image)
+        export SOURCELIB_ROOT="$HOME/csse3010/sourcelib"
+
+        # Use a separate gitconfig so we don't touch the user's ~/.gitconfig
+        export GIT_CONFIG_GLOBAL="$HOME/.config/csse3010/gitconfig"
+        mkdir -p "$(dirname "$GIT_CONFIG_GLOBAL")"
+
+        # Add sourcelib tools to PATH
+        if [ -d "$HOME/csse3010/sourcelib/tools" ]; then
+          export PATH="$HOME/csse3010/sourcelib/tools:$PATH"
+        fi
+        export PATH="$HOME/.local/bin:$PATH"
+
+        # Alias sudo to preserve Nix PATH so store binaries are found
+        alias sudo='sudo env PATH="$PATH" LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"'
+
+        ${pkgs.lib.optionalString isLinux ''
+          # LD_LIBRARY_PATH for JLink (Linux only)
+          if command -v JLinkExe &>/dev/null; then
+            JLINK_DIR="$(dirname "$(command -v JLinkExe)")"
+            export LD_LIBRARY_PATH="''${JLINK_DIR}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          fi
+        ''}
+
+        ${pkgs.lib.optionalString isDarwin ''
+          # macOS: warn if JLink is not installed
+          if ! command -v JLinkGDBServerCL &>/dev/null; then
+            printf '\e[33m[WARNING] SEGGER JLink tools not found on PATH.\e[0m\n'
+            printf '\e[33mPlease install JLink from: https://www.segger.com/downloads/jlink/\e[0m\n'
+            echo ""
+          fi
+        ''}
+
+        # Keep sourcelib in sync (background, same as WSL image)
+        if [ -d "$HOME/csse3010/sourcelib/.git" ]; then
+          (
+            ${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" fetch --all &>/dev/null || exit 0
+            LOCAL=$(${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" rev-parse HEAD 2>/dev/null)
+            REMOTE=$(${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" rev-parse origin/main 2>/dev/null)
+            DIRTY=$(${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" status --porcelain 2>/dev/null)
+
+            if [ -n "$DIRTY" ] || [ "$LOCAL" != "$REMOTE" ]; then
+              ${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" reset --hard origin/main &>/dev/null
+              ${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" clean -fd &>/dev/null
+            fi
+          ) & disown
+        fi
+
+        # Launch background setup scripts (mirror WSL systemd oneshots)
+        ${generateSshKeysScript} &>/dev/null &
+        ${setupSourcelibScript} &>/dev/null &
+
+        # Auto-trigger first-time setup (same as WSL interactiveShellInit)
+        if ! grep -q "lichen" "$HOME/.ssh/config" 2>/dev/null; then
+          csse3010-first-setup
+        fi
+
+        clear
+        motd
+        cd ~
+      '';
+
     in {
+      # Default: for macOS and non-NixOS Linux (no bundled VS Code)
       default = pkgs.mkShell {
         name = "csse3010";
-
         packages = commonPackages ++ linuxOnlyPackages;
+        shellHook = commonShellHook;
+      };
 
-        shellHook = ''
-          # Environment variables (same as WSL image)
-          export SOURCELIB_ROOT="$HOME/csse3010/sourcelib"
-
-          # Use a separate gitconfig so we don't touch the user's ~/.gitconfig
-          export GIT_CONFIG_GLOBAL="$HOME/.config/csse3010/gitconfig"
-          mkdir -p "$(dirname "$GIT_CONFIG_GLOBAL")"
-
-          # Add sourcelib tools to PATH
-          if [ -d "$HOME/csse3010/sourcelib/tools" ]; then
-            export PATH="$HOME/csse3010/sourcelib/tools:$PATH"
-          fi
-          export PATH="$HOME/.local/bin:$PATH"
-
-          ${pkgs.lib.optionalString isLinux ''
-            # LD_LIBRARY_PATH for JLink (Linux only)
-            if command -v JLinkExe &>/dev/null; then
-              JLINK_DIR="$(dirname "$(command -v JLinkExe)")"
-              export LD_LIBRARY_PATH="''${JLINK_DIR}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            fi
-          ''}
-
-          ${pkgs.lib.optionalString isDarwin ''
-            # macOS: warn if JLink is not installed
-            if ! command -v JLinkGDBServerCL &>/dev/null; then
-              printf '\e[33m[WARNING] SEGGER JLink tools not found on PATH.\e[0m\n'
-              printf '\e[33mPlease install JLink from: https://www.segger.com/downloads/jlink/\e[0m\n'
-              echo ""
-            fi
-          ''}
-
-          # Keep sourcelib in sync (background, same as WSL image)
-          if [ -d "$HOME/csse3010/sourcelib/.git" ]; then
-            (
-              ${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" fetch --all &>/dev/null || exit 0
-              LOCAL=$(${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" rev-parse HEAD 2>/dev/null)
-              REMOTE=$(${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" rev-parse origin/main 2>/dev/null)
-              DIRTY=$(${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" status --porcelain 2>/dev/null)
-
-              if [ -n "$DIRTY" ] || [ "$LOCAL" != "$REMOTE" ]; then
-                ${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" reset --hard origin/main &>/dev/null
-                ${pkgs.git}/bin/git -C "$HOME/csse3010/sourcelib" clean -fd &>/dev/null
-              fi
-            ) & disown
-          fi
-
-          # Launch background setup scripts (mirror WSL systemd oneshots)
-          ${generateSshKeysScript} &>/dev/null &
-          ${setupSourcelibScript} &>/dev/null &
-
-          # Auto-trigger first-time setup (same as WSL interactiveShellInit)
-          if ! grep -q "lichen" "$HOME/.ssh/config" 2>/dev/null; then
-            csse3010-first-setup
-          fi
-
-          clear
-          motd
-          cd ~
-        '';
+      # NixOS: includes VS Code with extensions pre-installed
+      nixos = pkgs.mkShell {
+        name = "csse3010-nixos";
+        packages = commonPackages ++ linuxOnlyPackages ++ [ vscode ];
+        shellHook = commonShellHook;
       };
     });
   };
