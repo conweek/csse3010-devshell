@@ -733,8 +733,15 @@ RULESEOF
         fi
         export PATH="$HOME/.local/bin:$PATH"
 
-        # sudo wrapper: prepend to PATH so it shadows /usr/bin/sudo
-        export PATH="${sudoWrapper}/bin:$PATH"
+        # sudo wrapper: create a local directory with our sudo that shadows /usr/bin/sudo
+        CSSE3010_SUDO_DIR="$HOME/.cache/csse3010/bin"
+        mkdir -p "$CSSE3010_SUDO_DIR"
+        cat > "$CSSE3010_SUDO_DIR/sudo" << 'SUDOEOF'
+#!/usr/bin/env bash
+exec /usr/bin/sudo env PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" "$@"
+SUDOEOF
+        chmod +x "$CSSE3010_SUDO_DIR/sudo"
+        export PATH="$CSSE3010_SUDO_DIR:$PATH"
         hash -r
 
         ${pkgs.lib.optionalString isLinux ''
@@ -781,10 +788,6 @@ RULESEOF
         clear
         motd
         cd ~
-
-        # Must be last: ensure sudo wrapper is at front of PATH
-        export PATH="${sudoWrapper}/bin:$PATH"
-        hash -r
       '';
 
     in {
