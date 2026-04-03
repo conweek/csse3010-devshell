@@ -573,6 +573,12 @@ RULESEOF
         done
       '';
 
+      # Wrapper that shadows /usr/bin/sudo so Nix store paths are preserved
+      # Works in make recipes, scripts, and interactive shells
+      sudoWrapper = pkgs.writeShellScriptBin "sudo" ''
+        exec /usr/bin/sudo env PATH="$PATH" LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}" "$@"
+      '';
+
       setupVscodeScript = pkgs.writeShellScriptBin "setup-vscode" ''
         set -euo pipefail
 
@@ -702,6 +708,9 @@ RULESEOF
         pkgs.clang-tools
         pkgs.bear
 
+        # sudo wrapper to preserve Nix PATH in make recipes and scripts
+        sudoWrapper
+
         # Scripts
         firstTimeSetupScript
         configureInfoScript
@@ -726,9 +735,6 @@ RULESEOF
           export PATH="$HOME/csse3010/sourcelib/tools:$PATH"
         fi
         export PATH="$HOME/.local/bin:$PATH"
-
-        # Alias sudo to preserve Nix PATH so store binaries are found
-        alias sudo='sudo env PATH="$PATH" LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}"'
 
         ${pkgs.lib.optionalString isLinux ''
           # LD_LIBRARY_PATH for JLink (Linux only)
