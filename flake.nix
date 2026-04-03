@@ -736,10 +736,7 @@ RULESEOF
         # sudo wrapper: create a local directory with our sudo that shadows /usr/bin/sudo
         CSSE3010_SUDO_DIR="$HOME/.cache/csse3010/bin"
         mkdir -p "$CSSE3010_SUDO_DIR"
-        cat > "$CSSE3010_SUDO_DIR/sudo" << 'SUDOEOF'
-#!/usr/bin/env bash
-exec /usr/bin/sudo env PATH="$PATH" LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}" "$@"
-SUDOEOF
+        printf '#!/usr/bin/env bash\nexec /usr/bin/sudo env PATH="$PATH" LD_LIBRARY_PATH="''${LD_LIBRARY_PATH:-}" "$@"\n' > "$CSSE3010_SUDO_DIR/sudo"
         chmod +x "$CSSE3010_SUDO_DIR/sudo"
         export PATH="$CSSE3010_SUDO_DIR:$PATH"
         hash -r
